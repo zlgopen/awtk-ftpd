@@ -18,7 +18,7 @@ static ret_t main_window_create(void) {
 ret_t application_init(void) {
   event_source_manager_t* esm = main_loop_get_event_source_manager(main_loop());
   socket_init();
-  s_ftpd = ftpd_create(esm, "./", 2122, 2123);
+  s_ftpd = ftpd_create(esm, "./", 2121, 2122);
   ftpd_set_user(s_ftpd, "admin", "admin");
   main_window_create();
   return ftpd_start(s_ftpd);
