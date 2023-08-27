@@ -1,0 +1,6 @@
+LIBRARY   ftpd
+EXPORTS
+    ftpd_create
+    ftpd_set_user
+    ftpd_start
+    ftpd_destroy
