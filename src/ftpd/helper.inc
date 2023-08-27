@@ -1,7 +1,10 @@
-
+#ifdef WIN32
+#pragma comment(lib, "ws2_32")
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 
 uint64_t socket_get_client_ip(int sockfd) {
   struct sockaddr_in addr;
