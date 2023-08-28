@@ -53,7 +53,6 @@ ftpd_t* ftpd_create(event_source_manager_t* esm, const char* root, uint32_t port
   ftpd->state = FTPD_STATE_NONE;
   path_abs_normalize(root, path, MAX_PATH);
   ftpd->root = tk_strdup(path);
-  tk_strncpy(ftpd->cwd, path, sizeof(ftpd->cwd) - 1);
 
   if (!dir_exist(ftpd->root)) {
     log_debug("%s not exist\n", ftpd->root);
@@ -77,6 +76,19 @@ ret_t ftpd_set_user(ftpd_t* ftpd, const char* user, const char* password) {
   return RET_OK;
 }
 
+static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path, char filename[MAX_PATH + 1]) {
+  char rel_filename[MAX_PATH + 1] = {0};
+
+  if (*path == '/' || *path == '\\') {
+    path_normalize(path, rel_filename, sizeof(rel_filename)-1);
+  } else {
+    path_build(filename, MAX_PATH, ftpd->cwd, path, NULL);
+    path_normalize(filename, rel_filename, sizeof(rel_filename)-1);
+  }
+
+  return path_normalize_with_root(ftpd->root, rel_filename, filename);
+}
+
 static ret_t ftpd_write_501_need_an_argv(tk_ostream_t* out) {
   return tk_ostream_write_str(out, "501 Syntax error: command needs an argument.\r\n");
 }
@@ -94,18 +106,7 @@ static ret_t ftpd_write_503_need_login(tk_ostream_t* out) {
 }
 
 static ret_t ftpd_write_257_cwd(tk_ostream_t* out, ftpd_t* ftpd) {
-  char* cwd = ftpd->cwd;
-  char* root = ftpd->root;
-  int32_t len = strlen(root);
-  const char* rel_cwd = NULL;
-
-  if (strncmp(cwd, root, len) == 0) {
-    rel_cwd = cwd + len - 1;
-  } else {
-    rel_cwd = "/";
-  }
-
-  return tk_ostream_printf(out, "257 \"%s\" is current directory.\r\n", rel_cwd);
+  return tk_ostream_printf(out, "257 \"/%s\" is current directory.\r\n", ftpd->cwd);
 }
 
 static const char* ftpd_get_cmd_arg(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
@@ -168,15 +169,17 @@ static ret_t ftpd_cmd_cwd(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
 
   if (path != NULL) {
     char cwd[MAX_PATH + 1] = {0};
-    if (path_normalize_with_root(ftpd->root, path, cwd) == NULL) {
+
+    if (ftpd_normalize_filename(ftpd, path, cwd) == NULL) {
       tk_strncpy(cwd, ftpd->root, sizeof(cwd) - 1);
     }
-    ret = fs_change_dir(os_fs(), cwd);
 
+    ret = fs_change_dir(os_fs(), cwd);
     if (ret != RET_OK) {
       ret = tk_ostream_write_str(out, "550 Failed to change directory.\r\n");
     } else {
-      tk_strncpy(ftpd->cwd, cwd, sizeof(ftpd->cwd) - 1);
+      uint32_t len = strlen(ftpd->root);
+      tk_strncpy(ftpd->cwd, cwd + len, sizeof(ftpd->cwd) - 1);
       ret = ftpd_write_257_cwd(out, ftpd);
     }
   } else {
@@ -194,7 +197,7 @@ static ret_t ftpd_cmd_size(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
     uint32_t size = 0;
     char filename[MAX_PATH + 1] = {0};
 
-    if (path_normalize_with_root(ftpd->root, path, filename) != NULL) {
+    if (ftpd_normalize_filename(ftpd, path, filename) != NULL) {
       size = file_get_size(filename);
     } else {
       size = 0;
@@ -264,19 +267,76 @@ static ret_t ftpd_cmd_port(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   }
 }
 
-static ret_t ftpd_get_list_result(ftpd_t* ftpd, str_t* result) {
-  fs_dir_t* dir = fs_open_dir(os_fs(), ftpd->cwd);
+static ret_t mlsd_from_fs_stat_info(str_t* result, fs_stat_info_t* info, const char* name) {
+  char modify[32] = {0};
+  char perm[32] = {0};
+  char unique[32] = {0};
+  const char* type = NULL;
+  date_time_t* dt = date_time_create();
+
+  if (info->is_dir) {
+    if (tk_str_eq(name, ".")) {
+      type = "cdir";
+    } else if (tk_str_eq(name, "..")) {
+      type = "pdir";
+    } else {
+      type = "dir";
+    }
+    strcpy(perm, "el");
+  } else {
+    type = "file";
+    strcpy(perm, "r");
+  }
+
+  date_time_from_time(dt, info->mtime);
+  tk_snprintf(modify, sizeof(modify), "%04d%02d%02d%02d%02d%02d", dt->year, dt->month, dt->day,
+              dt->hour, dt->minute, dt->second);
+  date_time_destroy(dt);
+
+  tk_snprintf(unique, sizeof(unique), "%xg%x", info->dev, info->ino);
+  str_append_format(result, 1024, "modify=%s;perm=%s;size=%u;type=%s;unique=%s; %s\r\n", modify,
+                    perm, (uint32_t)info->size, type, unique, name);
+
+  return RET_OK;
+}
+
+static ret_t list_from_fs_stat_info(str_t* result, fs_stat_info_t* info, const char* name) {
+  char perm[32] = {0};
+  char modify[32] = {0};
+  date_time_t* dt = date_time_create();
+
+  if (info->is_dir) {
+    strcpy(perm, "drwxr-xr-x");
+  } else {
+    strcpy(perm, "-rw-r--r--");
+  }
+
+  date_time_from_time(dt, info->mtime);
+  tk_snprintf(modify, sizeof(modify), "%s %d %d:%d", date_time_get_month_name(dt->month), dt->day,
+              dt->hour, dt->minute);
+  date_time_destroy(dt);
+
+  str_append_format(result, 1024, "%s %d user group %d %s %s\r\n", perm, info->nlink,
+                    (uint32_t)info->size, modify, name);
+
+  return RET_OK;
+}
+
+static ret_t ftpd_get_list_result(ftpd_t* ftpd, bool_t mlsd, str_t* result) {
+  fs_dir_t* dir = NULL;
+  char cwd[MAX_PATH + 1] = {0};
+  path_build(cwd, sizeof(cwd) - 1, ftpd->root, ftpd->cwd, NULL);
+
+  dir = fs_open_dir(os_fs(), cwd);
   if (dir != NULL) {
     fs_item_t item;
+    fs_stat_info_t info;
     while (fs_dir_read(dir, &item) == RET_OK) {
-      if (item.is_dir) {
-        /*FIXME:*/
-        str_append_format(result, 512, "--drwxr-xr-x   1 staff staff        11 Aug 20 00:23 %s\r\n",
-                          item.name);
-      } else if (item.is_reg_file) {
-        str_append_format(result, 512,
-                          "--rwxr-xr-x   1 staff      staff        11 Aug 20 00:23 %s\r\n",
-                          item.name);
+      fs_stat(os_fs(), item.name, &info);
+      if (mlsd) {
+        mlsd_from_fs_stat_info(result, &info, item.name);
+      } else {
+        list_from_fs_stat_info(result, &info, item.name);
       }
     }
     fs_dir_close(dir);
@@ -287,7 +347,6 @@ static ret_t ftpd_get_list_result(ftpd_t* ftpd, str_t* result) {
 
 static ret_t ftpd_cmd_list(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   char cwd[MAX_PATH + 1] = {0};
-
   fs_get_cwd(os_fs(), cwd);
   if (ftpd->data_ios != NULL) {
     str_t result;
@@ -296,7 +355,11 @@ static ret_t ftpd_cmd_list(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
     tk_ostream_printf(out, "150 File status okay. About to open data connection\r\n");
 
     str_init(&result, 1000);
-    ftpd_get_list_result(ftpd, &result);
+    if (strncasecmp(cmd, "MLSD", 4) == 0) {
+      ftpd_get_list_result(ftpd, TRUE, &result);
+    } else {
+      ftpd_get_list_result(ftpd, FALSE, &result);
+    }
     tk_ostream_write_str(data_out, result.str);
     str_reset(&result);
 
@@ -318,7 +381,7 @@ static ret_t ftpd_cmd_retr(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
       char filename[MAX_PATH + 1] = {0};
       tk_ostream_t* data_out = tk_iostream_get_ostream(ftpd->data_ios);
 
-      if (path_normalize_with_root(ftpd->root, path, filename) != NULL) {
+      if (ftpd_normalize_filename(ftpd, path, filename) != NULL) {
         fs_file_t* file = fs_open_file(os_fs(), filename, "rb");
         if (file != NULL) {
           int ret = 0;
@@ -336,6 +399,7 @@ static ret_t ftpd_cmd_retr(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
               break;
             }
           } while (TRUE);
+          fs_file_close(file);
           tk_ostream_printf(out, "226 Transfer complete\r\n");
         } else {
           ftpd_write_550_access_failed(out);
@@ -361,7 +425,7 @@ static ret_t ftpd_cmd_stor(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
       char filename[MAX_PATH + 1] = {0};
       tk_istream_t* data_in = tk_iostream_get_istream(ftpd->data_ios);
 
-      if (path_normalize_with_root(ftpd->root, path, filename) != NULL) {
+      if (ftpd_normalize_filename(ftpd, path, filename) != NULL) {
         int ret = 0;
         char buff[1024] = {0};
         fs_file_t* file = fs_open_file(os_fs(), filename, "wb+");
@@ -376,7 +440,6 @@ static ret_t ftpd_cmd_stor(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
             fs_file_write(file, buff, ret);
           } while (TRUE);
           fs_file_close(file);
-
           tk_ostream_printf(out, "226 Transfer complete\r\n");
         } else {
           ftpd_write_550_access_failed(out);
@@ -392,6 +455,21 @@ static ret_t ftpd_cmd_stor(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
     }
   } else {
     return ftpd_write_501_need_an_argv(out);
+  }
+
+  return RET_OK;
+}
+
+static ret_t ftpd_cmd_opts(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  const char* args = ftpd_get_cmd_arg(ftpd, cmd, out);
+  if (args != NULL) {
+    if (strncasecmp(args, "UTF8 ON", 7) == 0) {
+      tk_ostream_printf(out, "200 Always in UTF8 mode.\r\n");
+    } else {
+      tk_ostream_printf(out, "500 Command \"%s\" not understood.\r\n", cmd);
+    }
+  } else {
+    tk_ostream_printf(out, "501 Syntax error in parameters or arguments.\r\n");
   }
 
   return RET_OK;
@@ -422,6 +500,8 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     ftpd_cmd_pwd(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "CWD", 3) == 0) {
     ftpd_cmd_cwd(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "CDUP", 4) == 0) {
+    ftpd_cmd_cwd(ftpd, "CWD ..", out);
   } else if (strncasecmp(cmd, "TYPE", 4) == 0) {
     ftpd_cmd_type(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "SIZE", 4) == 0) {
@@ -431,6 +511,10 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
   } else if (strncasecmp(cmd, "PORT", 4) == 0) {
     ftpd_cmd_port(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "LIST", 4) == 0) {
+    return ftpd_cmd_list(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "OPTS", 4) == 0) {
+    return ftpd_cmd_opts(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "MLSD", 4) == 0) {
     return ftpd_cmd_list(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "RETR", 4) == 0) {
     return ftpd_cmd_retr(ftpd, cmd, out);
