@@ -93,6 +93,7 @@ typedef struct _ftpd_t {
   event_source_t* source;
   char cwd[MAX_PATH + 1];
   event_source_manager_t* esm;
+  char* from_name;
 } ftpd_t;
 
 /**

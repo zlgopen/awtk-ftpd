@@ -34,6 +34,17 @@ enum _ftpd_state_t {
   FTPD_STATE_LOGIN,
 };
 
+static bool_t is_from_same_ip(ftpd_t* ftpd) {
+  if (ftpd->data_ios != NULL && ftpd->ios != NULL) {
+    int fd = tk_object_get_prop_int(TK_OBJECT(ftpd->ios), TK_STREAM_PROP_FD, -1);
+    int data_fd = tk_object_get_prop_int(TK_OBJECT(ftpd->data_ios), TK_STREAM_PROP_FD, -1);
+
+    return socket_get_client_ip(fd) == socket_get_client_ip(data_fd);
+  }
+
+  return FALSE;
+}
+
 ftpd_t* ftpd_create(event_source_manager_t* esm, const char* root, uint32_t port,
                     uint32_t data_port) {
   ftpd_t* ftpd = NULL;
@@ -76,14 +87,15 @@ ret_t ftpd_set_user(ftpd_t* ftpd, const char* user, const char* password) {
   return RET_OK;
 }
 
-static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path, char filename[MAX_PATH + 1]) {
+static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path,
+                                           char filename[MAX_PATH + 1]) {
   char rel_filename[MAX_PATH + 1] = {0};
 
   if (*path == '/' || *path == '\\') {
-    path_normalize(path, rel_filename, sizeof(rel_filename)-1);
+    path_normalize(path, rel_filename, sizeof(rel_filename) - 1);
   } else {
     path_build(filename, MAX_PATH, ftpd->cwd, path, NULL);
-    path_normalize(filename, rel_filename, sizeof(rel_filename)-1);
+    path_normalize(filename, rel_filename, sizeof(rel_filename) - 1);
   }
 
   return path_normalize_with_root(ftpd->root, rel_filename, filename);
@@ -91,6 +103,10 @@ static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path, char 
 
 static ret_t ftpd_write_501_need_an_argv(tk_ostream_t* out) {
   return tk_ostream_write_str(out, "501 Syntax error: command needs an argument.\r\n");
+}
+
+static ret_t ftpd_write_501_syntax_error(tk_ostream_t* out) {
+  return tk_ostream_printf(out, "501 Syntax error in parameters or arguments.\r\n");
 }
 
 static ret_t ftpd_write_550_access_failed(tk_ostream_t* out) {
@@ -348,7 +364,7 @@ static ret_t ftpd_get_list_result(ftpd_t* ftpd, bool_t mlsd, str_t* result) {
 static ret_t ftpd_cmd_list(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   char cwd[MAX_PATH + 1] = {0};
   fs_get_cwd(os_fs(), cwd);
-  if (ftpd->data_ios != NULL) {
+  if (is_from_same_ip(ftpd)) {
     str_t result;
     tk_ostream_t* data_out = tk_iostream_get_ostream(ftpd->data_ios);
 
@@ -377,7 +393,7 @@ static ret_t ftpd_cmd_retr(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
 
   if (path != NULL) {
-    if (ftpd->data_ios != NULL) {
+    if (is_from_same_ip(ftpd)) {
       char filename[MAX_PATH + 1] = {0};
       tk_ostream_t* data_out = tk_iostream_get_ostream(ftpd->data_ios);
 
@@ -421,7 +437,7 @@ static ret_t ftpd_cmd_stor(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
 
   if (path != NULL) {
-    if (ftpd->data_ios != NULL) {
+    if (is_from_same_ip(ftpd)) {
       char filename[MAX_PATH + 1] = {0};
       tk_istream_t* data_in = tk_iostream_get_istream(ftpd->data_ios);
 
@@ -460,6 +476,150 @@ static ret_t ftpd_cmd_stor(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   return RET_OK;
 }
 
+static ret_t ftpd_cmd_dele(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  ret_t ret = RET_OK;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  if (path != NULL) {
+    char filename[MAX_PATH + 1] = {0};
+
+    if (ftpd_normalize_filename(ftpd, path, filename) == NULL) {
+      return ftpd_write_501_syntax_error(out);
+    }
+
+    if (!file_exist(filename)) {
+      return tk_ostream_write_str(out, "550 File not exist.\r\n");
+    }
+
+    ret = fs_remove_file(os_fs(), filename);
+    if (ret != RET_OK) {
+      ret = tk_ostream_write_str(out, "550 Failed to remove file.\r\n");
+    } else {
+      ret = tk_ostream_write_str(out, "200 Remove file ok.\r\n");
+    }
+  } else {
+    ret = ftpd_write_501_need_an_argv(out);
+  }
+
+  return ret;
+}
+
+static ret_t ftpd_cmd_rmd(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  ret_t ret = RET_OK;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  if (path != NULL) {
+    char full_path[MAX_PATH + 1] = {0};
+
+    if (ftpd_normalize_filename(ftpd, path, full_path) == NULL) {
+      return ftpd_write_501_syntax_error(out);
+    }
+
+    if (!dir_exist(full_path)) {
+      return tk_ostream_write_str(out, "550 Directory not exist.\r\n");
+    }
+
+    ret = fs_remove_dir_r(os_fs(), full_path);
+    if (ret != RET_OK) {
+      ret = tk_ostream_write_str(out, "550 Failed to remove directory.\r\n");
+    } else {
+      ret = tk_ostream_write_str(out, "200 Remove directory ok.\r\n");
+    }
+  } else {
+    ret = ftpd_write_501_need_an_argv(out);
+  }
+
+  return ret;
+}
+
+static ret_t ftpd_cmd_mkd(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  ret_t ret = RET_OK;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  if (path != NULL) {
+    char full_path[MAX_PATH + 1] = {0};
+
+    if (ftpd_normalize_filename(ftpd, path, full_path) == NULL) {
+      return ftpd_write_501_syntax_error(out);
+    }
+
+    if (dir_exist(full_path)) {
+      return tk_ostream_write_str(out, "550 Directory exist.\r\n");
+    }
+
+    ret = fs_create_dir_r(os_fs(), full_path);
+    if (ret != RET_OK) {
+      ret = tk_ostream_write_str(out, "550 Failed to create directory.\r\n");
+    } else {
+      ret = tk_ostream_write_str(out, "200 Create directory ok.\r\n");
+    }
+  } else {
+    ret = ftpd_write_501_need_an_argv(out);
+  }
+
+  return ret;
+}
+
+static ret_t ftpd_cmd_rnfr(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  ret_t ret = RET_OK;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  if (path != NULL) {
+    char full_path[MAX_PATH + 1] = {0};
+
+    if (ftpd_normalize_filename(ftpd, path, full_path) == NULL) {
+      return ftpd_write_501_syntax_error(out);
+    }
+
+    if (!dir_exist(full_path) && !file_exist(full_path)) {
+      return tk_ostream_write_str(out, "550 File or directory not exist.\r\n");
+    }
+
+    TKMEM_FREE(ftpd->from_name);
+    ftpd->from_name = tk_strdup(full_path);
+    ret = tk_ostream_write_str(out, "200 OK.\r\n");
+  } else {
+    ret = ftpd_write_501_need_an_argv(out);
+  }
+
+  return ret;
+}
+
+static ret_t ftpd_cmd_rnto(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  ret_t ret = RET_OK;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  if (path != NULL) {
+    char full_path[MAX_PATH + 1] = {0};
+
+    if (ftpd_normalize_filename(ftpd, path, full_path) == NULL || ftpd->from_name == NULL) {
+      return ftpd_write_501_syntax_error(out);
+    }
+
+    if (dir_exist(full_path) || file_exist(full_path)) {
+      return tk_ostream_write_str(out, "550 File or directory exist.\r\n");
+    }
+
+    if (dir_exist(ftpd->from_name)) {
+      ret = fs_dir_rename(os_fs(), ftpd->from_name, full_path);
+    } else {
+      ret = fs_file_rename(os_fs(), ftpd->from_name, full_path);
+    }
+    TKMEM_FREE(ftpd->from_name);
+
+    log_debug("%s => %s\n", ftpd->from_name, full_path);
+    if (ret != RET_OK) {
+      ret = tk_ostream_write_str(out, "550 Failed to rename.\r\n");
+    } else {
+      ret = tk_ostream_write_str(out, "200 Rename ok.\r\n");
+    }
+  } else {
+    ret = ftpd_write_501_need_an_argv(out);
+  }
+
+  return ret;
+}
+
 static ret_t ftpd_cmd_opts(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   const char* args = ftpd_get_cmd_arg(ftpd, cmd, out);
   if (args != NULL) {
@@ -469,7 +629,7 @@ static ret_t ftpd_cmd_opts(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
       tk_ostream_printf(out, "500 Command \"%s\" not understood.\r\n", cmd);
     }
   } else {
-    tk_ostream_printf(out, "501 Syntax error in parameters or arguments.\r\n");
+    return ftpd_write_501_syntax_error(out);
   }
 
   return RET_OK;
@@ -520,6 +680,16 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     return ftpd_cmd_retr(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "STOR", 4) == 0) {
     return ftpd_cmd_stor(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "DELE", 4) == 0) {
+    return ftpd_cmd_dele(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "MKD", 3) == 0) {
+    return ftpd_cmd_mkd(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "RMD", 3) == 0) {
+    return ftpd_cmd_rmd(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "RNFR", 4) == 0) {
+    return ftpd_cmd_rnfr(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "RNTO", 4) == 0) {
+    return ftpd_cmd_rnto(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "QUIT", 4) == 0) {
     return ftpd_cmd_quit(ftpd, cmd, out);
   } else {
@@ -675,6 +845,7 @@ ret_t ftpd_destroy(ftpd_t* ftpd) {
   TKMEM_FREE(ftpd->root);
   TKMEM_FREE(ftpd->user);
   TKMEM_FREE(ftpd->password);
+  TKMEM_FREE(ftpd->from_name);
 
   TKMEM_FREE(ftpd);
 
