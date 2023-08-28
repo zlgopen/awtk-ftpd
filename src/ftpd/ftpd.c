@@ -23,7 +23,6 @@
 #include "streams/inet/iostream_tcp.h"
 
 #include "ftpd/ftpd.h"
-#include "./helper.inc"
 
 #define FTPD_WELCOME_MSG "220 AWTK FTPD ready.\r\n"
 
@@ -39,7 +38,7 @@ static bool_t is_from_same_ip(ftpd_t* ftpd) {
     int fd = tk_object_get_prop_int(TK_OBJECT(ftpd->ios), TK_STREAM_PROP_FD, -1);
     int data_fd = tk_object_get_prop_int(TK_OBJECT(ftpd->data_ios), TK_STREAM_PROP_FD, -1);
 
-    return socket_get_client_ip(fd) == socket_get_client_ip(data_fd);
+    return tk_socket_get_client_ip(fd) == tk_socket_get_client_ip(data_fd);
   }
 
   return FALSE;
@@ -98,7 +97,7 @@ static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path,
     path_normalize(filename, rel_filename, sizeof(rel_filename) - 1);
   }
 
-  return path_normalize_with_root(ftpd->root, rel_filename, filename);
+  return path_abs_normalize_with_root(ftpd->root, rel_filename, filename);
 }
 
 static ret_t ftpd_write_501_need_an_argv(tk_ostream_t* out) {
@@ -235,8 +234,8 @@ static ret_t ftpd_cmd_pasv(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   char ip[64] = {0};
   int sock = tk_object_get_prop_int(TK_OBJECT(out), TK_STREAM_PROP_FD, -1);
 
-  socket_get_self_ip_str(sock, ip, sizeof(ip));
-  tk_str_replace_char(ip, '.', ',');
+  tk_socket_get_self_ip_str(sock, ip, sizeof(ip));
+  tk_replace_char(ip, '.', ',');
   tk_ostream_printf(out, "227 Entering Passive Mode (%s,%d,%d).\r\n", ip, ftpd->data_port / 256,
                     ftpd->data_port % 256);
   return RET_OK;
@@ -738,11 +737,11 @@ static ret_t ftpd_on_data_client(event_source_t* source) {
       ftpd->data_ios = ios;
     } else {
       log_debug("oom! disconnected:%d\n", sock);
-      socket_close(sock);
+      tk_socket_close(sock);
     }
   } else {
     log_debug("error disconnected:%d\n", sock);
-    socket_close(sock);
+    tk_socket_close(sock);
   }
 
   return RET_OK;
@@ -770,11 +769,11 @@ static ret_t ftpd_on_client(event_source_t* source) {
       tk_ostream_write_str(out, FTPD_WELCOME_MSG);
     } else {
       log_debug("oom! disconnected:%d\n", sock);
-      socket_close(sock);
+      tk_socket_close(sock);
     }
   } else {
     log_debug("error disconnected:%d\n", sock);
-    socket_close(sock);
+    tk_socket_close(sock);
   }
   return RET_OK;
 }
@@ -834,7 +833,7 @@ ret_t ftpd_destroy(ftpd_t* ftpd) {
   return_value_if_fail(ftpd != NULL, RET_BAD_PARAMS);
 
   if (ftpd->sock >= 0) {
-    socket_close(ftpd->sock);
+    tk_socket_close(ftpd->sock);
     ftpd->sock = -1;
   }
 
