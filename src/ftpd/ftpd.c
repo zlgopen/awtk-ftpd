@@ -667,7 +667,7 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     ftpd_cmd_pasv(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "PORT", 4) == 0) {
     ftpd_cmd_port(ftpd, cmd, out);
-  } else if (strncasecmp(cmd, "LIST", 4) == 0) {
+  } else if (strncasecmp(cmd, "LIST", 4) == 0 || strncasecmp(cmd, "NLST", 4) == 0) {
     return ftpd_cmd_list(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "OPTS", 4) == 0) {
     return ftpd_cmd_opts(ftpd, cmd, out);
