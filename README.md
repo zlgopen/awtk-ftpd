@@ -23,7 +23,7 @@ git clone https://github.com/zlgopen/awtk.git
 cd awtk; scons; cd -
 ```
 
-### 2.2 获取 awtk-restful-httpd 并编译
+### 2.2 获取 awtk-ftpd 并编译
 
 ```
 git clone https://github.com/zlgopen/awtk-ftpd.git
