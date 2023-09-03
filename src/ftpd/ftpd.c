@@ -655,8 +655,6 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     ftpd_cmd_pass(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "SYST", 4) == 0) {
     ftpd_cmd_syst(ftpd, cmd, out);
-  } else if (strncasecmp(cmd, "PWD", 3) == 0) {
-    ftpd_cmd_pwd(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "CWD", 3) == 0) {
     ftpd_cmd_cwd(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "CDUP", 4) == 0) {
@@ -669,7 +667,7 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     ftpd_cmd_pasv(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "PORT", 4) == 0) {
     ftpd_cmd_port(ftpd, cmd, out);
-  } else if (strncasecmp(cmd, "LIST", 4) == 0) {
+  } else if (strncasecmp(cmd, "LIST", 4) == 0 || strncasecmp(cmd, "NLST", 4) == 0) {
     return ftpd_cmd_list(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "OPTS", 4) == 0) {
     return ftpd_cmd_opts(ftpd, cmd, out);
@@ -681,10 +679,12 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     return ftpd_cmd_stor(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "DELE", 4) == 0) {
     return ftpd_cmd_dele(ftpd, cmd, out);
-  } else if (strncasecmp(cmd, "MKD", 3) == 0) {
+  } else if (strncasecmp(cmd, "MKD", 3) == 0 || strncasecmp(cmd, "XMKD", 4) == 0) {
     return ftpd_cmd_mkd(ftpd, cmd, out);
-  } else if (strncasecmp(cmd, "RMD", 3) == 0) {
+  } else if (strncasecmp(cmd, "RMD", 3) == 0 || strncasecmp(cmd, "XRMD", 4) == 0) {
     return ftpd_cmd_rmd(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "PWD", 3) == 0 || strncasecmp(cmd, "XPWD", 4) == 0) {
+    ftpd_cmd_pwd(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "RNFR", 4) == 0) {
     return ftpd_cmd_rnfr(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "RNTO", 4) == 0) {
