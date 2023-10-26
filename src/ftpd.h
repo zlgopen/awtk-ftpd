@@ -27,6 +27,8 @@
 
 BEGIN_C_DECLS
 
+typedef ret_t (*ftpd_check_user_t)(void* ctx, const char* user, const char* password);
+
 /**
  * @class ftpd_t
  * @annotation ["fake"]
@@ -94,6 +96,10 @@ typedef struct _ftpd_t {
   char cwd[MAX_PATH + 1];
   event_source_manager_t* esm;
   char* from_name;
+
+  char* login_user;
+  void* check_user_ctx;
+  ftpd_check_user_t check_user;
 } ftpd_t;
 
 /**
@@ -112,6 +118,7 @@ ftpd_t* ftpd_create(event_source_manager_t* esm, const char* root, uint32_t port
 /**
  * @method ftpd_set_user
  * 设置用户名和密码。
+ * > ftpd\_set\_user和ftpd\_set\_check\_user只能调用一个。
  * @param {ftpd_t*} ftpd ftp服务器对象。
  * @param {const char*} user 用户名。
  * @param {const char*} password 密码。
@@ -119,6 +126,18 @@ ftpd_t* ftpd_create(event_source_manager_t* esm, const char* root, uint32_t port
  * @return {ret_t} 返回RET_OK表示成功，否则表示失败。
  */
 ret_t ftpd_set_user(ftpd_t* ftpd, const char* user, const char* password);
+
+/**
+ * @method ftpd_set_check_user
+ * 设置用户名和密码检查函数。
+ * > ftpd\_set\_user和ftpd\_set\_check\_user只能调用一个。
+ * @param {ftpd_t*} ftpd ftp服务器对象。
+ * @param {ftpd_check_user_t} check_user 用户名和密码检查函数。
+ * @param {void*} ctx 上下文。
+ * 
+ * @return {ret_t} 返回RET_OK表示成功，否则表示失败。
+ */
+ret_t ftpd_set_check_user(ftpd_t* ftpd, ftpd_check_user_t check_user, void* ctx);
 
 /**
  * @method ftpd_start

@@ -2,5 +2,6 @@ LIBRARY   ftpd
 EXPORTS
     ftpd_create
     ftpd_set_user
+    ftpd_set_check_user
     ftpd_start
     ftpd_destroy

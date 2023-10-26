@@ -1,5 +1,5 @@
 ﻿#include "awtk.h"
-#include "ftpd/ftpd.h"
+#include "ftpd.h"
 
 static ftpd_t* s_ftpd = NULL;
 

@@ -22,7 +22,7 @@
 #include "tkc.h"
 #include "streams/inet/iostream_tcp.h"
 
-#include "ftpd/ftpd.h"
+#include "ftpd.h"
 
 #define FTPD_WELCOME_MSG "220 AWTK FTPD ready.\r\n"
 
@@ -86,6 +86,16 @@ ret_t ftpd_set_user(ftpd_t* ftpd, const char* user, const char* password) {
   return RET_OK;
 }
 
+ret_t ftpd_set_check_user(ftpd_t* ftpd, ftpd_check_user_t check_user, void* ctx) {
+  return_value_if_fail(ftpd != NULL, RET_BAD_PARAMS);
+  return_value_if_fail(check_user != NULL, RET_BAD_PARAMS);
+
+  ftpd->check_user = check_user;
+  ftpd->check_user_ctx = ctx;
+
+  return RET_OK;
+}
+
 static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path,
                                            char filename[MAX_PATH + 1]) {
   char rel_filename[MAX_PATH + 1] = {0};
@@ -139,15 +149,22 @@ static ret_t ftpd_cmd_user(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   const char* user = ftpd_get_cmd_arg(ftpd, cmd, out);
 
   if (user != NULL) {
-    if (tk_str_eq(user, ftpd->user)) {
-      ftpd->state = FTPD_STATE_USER;
-      ret = tk_ostream_printf(out, "331 Password required for %s.\r\n", user);
-    } else {
-      ret = ftpd_write_530_login_failed(out);
-    }
+    TKMEM_FREE(ftpd->login_user);
+    ftpd->login_user = tk_strdup(user);
+
+    ftpd->state = FTPD_STATE_USER;
+    ret = tk_ostream_printf(out, "331 Password required for %s.\r\n", user);
   }
 
   return ret;
+}
+
+static bool_t ftpd_check_user(ftpd_t* ftpd, const char* user, const char* password) {
+  if (ftpd->check_user != NULL) {
+    return ftpd->check_user(ftpd->check_user_ctx, user, password) == RET_OK;
+  } else {
+    return tk_str_eq(user, ftpd->user) && tk_str_eq(password, ftpd->password);
+  }
 }
 
 static ret_t ftpd_cmd_pass(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
@@ -158,7 +175,7 @@ static ret_t ftpd_cmd_pass(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   } else {
     const char* password = ftpd_get_cmd_arg(ftpd, cmd, out);
     if (password != NULL) {
-      if (tk_str_eq(password, ftpd->password)) {
+      if (ftpd_check_user(ftpd, ftpd->login_user, password)) {
         ftpd->state = FTPD_STATE_LOGIN;
         ret = tk_ostream_printf(out, "230 User %s logged in.\r\n", ftpd->user);
       } else {
@@ -790,7 +807,7 @@ static ret_t ftpd_listen(ftpd_t* ftpd) {
   source = event_source_fd_create(sock, ftpd_on_client, ftpd);
   return_value_if_fail(source != NULL, RET_OOM);
 
-  log_debug("listen on %d\n", ftpd->port);
+  log_debug("ftpd listen on %d\n", ftpd->port);
   event_source_manager_add(ftpd->esm, source);
   OBJECT_UNREF(source);
 
@@ -809,7 +826,7 @@ static ret_t ftpd_listen_data_port(ftpd_t* ftpd) {
   source = event_source_fd_create(sock, ftpd_on_data_client, ftpd);
   return_value_if_fail(source != NULL, RET_OOM);
 
-  log_debug("listen on %d\n", ftpd->data_port);
+  log_debug("ftpd data listen on %d\n", ftpd->data_port);
   event_source_manager_add(ftpd->esm, source);
   OBJECT_UNREF(source);
 
@@ -818,13 +835,17 @@ static ret_t ftpd_listen_data_port(ftpd_t* ftpd) {
 
 ret_t ftpd_start(ftpd_t* ftpd) {
   return_value_if_fail(ftpd != NULL && ftpd->sock < 0, RET_BAD_PARAMS);
-  return_value_if_fail(ftpd->user != NULL, RET_BAD_PARAMS);
-  return_value_if_fail(ftpd->password != NULL, RET_BAD_PARAMS);
+  return_value_if_fail((ftpd->user != NULL || ftpd->check_user != NULL), RET_BAD_PARAMS);
 
   fs_change_dir(os_fs(), ftpd->root);
 
-  ftpd_listen(ftpd);
-  ftpd_listen_data_port(ftpd);
+  if (ftpd_listen(ftpd) != RET_OK) {
+    return RET_FAIL;
+  }
+
+  if (ftpd_listen_data_port(ftpd) != RET_OK) {
+    return RET_FAIL;
+  }
 
   return RET_OK;
 }
