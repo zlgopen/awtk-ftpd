@@ -177,7 +177,7 @@ static ret_t ftpd_cmd_pass(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
     if (password != NULL) {
       if (ftpd_check_user(ftpd, ftpd->login_user, password)) {
         ftpd->state = FTPD_STATE_LOGIN;
-        ret = tk_ostream_printf(out, "230 User %s logged in.\r\n", ftpd->user);
+        ret = tk_ostream_printf(out, "230 User %s logged in.\r\n", ftpd->login_user);
       } else {
         ret = ftpd_write_503_need_login(out);
       }
@@ -217,6 +217,29 @@ static ret_t ftpd_cmd_cwd(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
   } else {
     ret = ftpd_write_501_need_an_argv(out);
   }
+
+  return ret;
+}
+
+static ret_t ftpd_cmd_sha256(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  str_t sha256;
+  ret_t ret = RET_FAIL;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  str_init(&sha256, 256);
+  if (path != NULL) {
+    char filename[MAX_PATH + 1] = {0};
+    if (ftpd_normalize_filename(ftpd, path, filename) != NULL) {
+      ret = tk_sha256_file(filename, 10240, &sha256);
+    }
+  }
+
+  if (ret == RET_OK && sha256.size > 0) {
+    ret = tk_ostream_printf(out, "213 %s\r\n", sha256.str);
+  } else {
+    ret = ftpd_write_501_need_an_argv(out);
+  }
+  str_reset(&sha256);
 
   return ret;
 }
@@ -680,6 +703,8 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     ftpd_cmd_type(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "SIZE", 4) == 0) {
     ftpd_cmd_size(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "SHA256", 6) == 0) {
+    ftpd_cmd_sha256(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "PASV", 4) == 0) {
     ftpd_cmd_pasv(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "PORT", 4) == 0) {
@@ -769,6 +794,14 @@ static ret_t ftpd_on_client(event_source_t* source) {
   ftpd_t* ftpd = (ftpd_t*)(event_source_fd->ctx);
   int fd = event_source_get_fd(source);
   int sock = tcp_accept(fd);
+
+  if (ftpd->ios != NULL) {
+    const char* msg = "530 server busy.\r\n";
+    tk_socket_send(sock, msg, strlen(msg), 0);
+    tk_socket_close(sock);
+    log_debug("close %d: %s", sock, msg);
+    return RET_OK;
+  }
 
   event_source_manager_remove(ftpd->esm, ftpd->source);
   TK_OBJECT_UNREF(ftpd->ios);
