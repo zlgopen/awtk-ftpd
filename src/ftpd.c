@@ -890,9 +890,18 @@ ret_t ftpd_destroy(ftpd_t* ftpd) {
     tk_socket_close(ftpd->sock);
     ftpd->sock = -1;
   }
+  
+  if (ftpd->data_sock >= 0) {
+    tk_socket_close(ftpd->data_sock);
+    ftpd->data_sock = -1;
+  }
 
   if (ftpd->ios != NULL) {
     TK_OBJECT_UNREF(ftpd->ios);
+  }
+  
+  if (ftpd->data_ios != NULL) {
+    TK_OBJECT_UNREF(ftpd->data_ios);
   }
 
   TKMEM_FREE(ftpd->root);
