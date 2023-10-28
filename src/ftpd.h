@@ -1,7 +1,7 @@
 ﻿/**
  * File:   ftpd.h
  * Author: AWTK Develop Team
- * Brief:  map one str to another str
+ * Brief:  ftp server
  *
  * Copyright (c) 2018 - 2023  Guangzhou ZHIYUAN Electronics Co.,Ltd.
  *
@@ -37,13 +37,13 @@ typedef ret_t (*ftpd_check_user_t)(void* ctx, const char* user, const char* pass
  */
 typedef struct _ftpd_t {
   /**
-   * @property {int} port
+   * @property {uint32_t} port
    * 默认端口。
    */
   uint32_t port;
 
   /**
-   * @property {int} data_port
+   * @property {uint32_t} data_port
    * 数据传输的socket。
    */
   uint32_t data_port;

@@ -1,7 +1,7 @@
 /**
  * File:   ftpd.c
  * Author: AWTK Develop Team
- * Brief:  map one str to another str
+ * Brief:  ftp server
  *
  * Copyright (c) 2018 - 2023  Guangzhou ZHIYUAN Electronics Co.,Ltd.
  *
@@ -240,6 +240,48 @@ static ret_t ftpd_cmd_sha256(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
     ret = ftpd_write_501_need_an_argv(out);
   }
   str_reset(&sha256);
+
+  return ret;
+}
+
+static ret_t ftpd_cmd_xstat(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
+  ret_t ret = RET_OK;
+  const char* path = ftpd_get_cmd_arg(ftpd, cmd, out);
+
+  if (path != NULL) {
+    char filename[MAX_PATH + 1] = {0};
+    if (ftpd_normalize_filename(ftpd, path, filename) != NULL) {
+      fs_stat_info_t info;
+      if(fs_stat(os_fs(), filename, &info) == RET_OK) {
+        str_t result;
+        str_init(&result, 1024);
+        str_append(&result, "200 ");
+        str_append_int64(&result, info.size);
+        str_append(&result, " ");
+        str_append_int64(&result, info.mtime);
+        str_append(&result, " ");
+        str_append_int64(&result, info.ctime);
+        str_append(&result, " ");
+        str_append_int64(&result, info.atime);
+        str_append(&result, " ");
+        str_append_int(&result, info.is_dir);
+        str_append(&result, " ");
+        str_append_int(&result, info.is_link);
+        str_append(&result, " ");
+        str_append_int(&result, info.is_reg_file);
+        str_append(&result, " ");
+        str_append_int(&result, info.uid);
+        str_append(&result, " ");
+        str_append_int(&result, info.gid);
+        str_append(&result, "\r\n");
+        ret = tk_ostream_write(out, result.str, result.size);
+        str_reset(&result);
+
+        return ret;
+      }
+    }
+  }
+  ret = ftpd_write_501_need_an_argv(out);
 
   return ret;
 }
@@ -703,6 +745,8 @@ static ret_t ftpd_dispatch(ftpd_t* ftpd, const char* cmd) {
     ftpd_cmd_type(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "SIZE", 4) == 0) {
     ftpd_cmd_size(ftpd, cmd, out);
+  } else if (strncasecmp(cmd, "XSTAT", 5) == 0) {
+    ftpd_cmd_xstat(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "SHA256", 6) == 0) {
     ftpd_cmd_sha256(ftpd, cmd, out);
   } else if (strncasecmp(cmd, "PASV", 4) == 0) {
