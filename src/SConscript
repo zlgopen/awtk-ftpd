@@ -11,7 +11,10 @@ SOURCES=Glob('*.c')
 
 EXPORT_DEF=''
 if OS_NAME == 'Windows':
-  EXPORT_DEF = ' /DEF:"src/ftpd.def" '
+  if os.environ['TOOLS_NAME'] == '' :
+    EXPORT_DEF = ' /DEF:"src/ftpd.def" '
+  elif os.environ['TOOLS_NAME'] == 'mingw' :
+    EXPORT_DEF = ' "src/ftpd.def" '
 
 if 'BUILD_SHARED' in os.environ and os.environ['BUILD_SHARED'] == 'True':
   LIBS=['awtk'];
