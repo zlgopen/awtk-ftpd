@@ -122,10 +122,6 @@ static ret_t ftpd_write_550_access_failed(tk_ostream_t* out) {
   return tk_ostream_printf(out, "550 File not found or access denied\r\n");
 }
 
-static ret_t ftpd_write_530_login_failed(tk_ostream_t* out) {
-  return tk_ostream_write_str(out, "530 Login incorrect.\r\n");
-}
-
 static ret_t ftpd_write_503_need_login(tk_ostream_t* out) {
   return tk_ostream_write_str(out, "503 Login with USER first.\r\n");
 }
