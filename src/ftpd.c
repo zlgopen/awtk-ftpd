@@ -110,6 +110,14 @@ static const char* ftpd_normalize_filename(ftpd_t* ftpd, const char* path,
   return path_abs_normalize_with_root(ftpd->root, rel_filename, filename);
 }
 
+static ret_t ftpd_write_550_failed_to_remove_file(tk_ostream_t* out) {
+  return tk_ostream_write_str(out, "Failed to remove file.\r\n");
+}
+
+static ret_t ftpd_write_550_file_not_exist(tk_ostream_t* out) {
+  return tk_ostream_write_str(out, "550 File not exist.\r\n");
+}
+
 static ret_t ftpd_write_501_need_an_argv(tk_ostream_t* out) {
   return tk_ostream_write_str(out, "501 Syntax error: command needs an argument.\r\n");
 }
@@ -274,6 +282,8 @@ static ret_t ftpd_cmd_xstat(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
         str_reset(&result);
 
         return ret;
+      } else {
+        return ftpd_write_550_file_not_exist(out);
       }
     }
   }
@@ -565,12 +575,12 @@ static ret_t ftpd_cmd_dele(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
     }
 
     if (!file_exist(filename)) {
-      return tk_ostream_write_str(out, "550 File not exist.\r\n");
+      return ftpd_write_550_file_not_exist(out);
     }
 
     ret = fs_remove_file(os_fs(), filename);
     if (ret != RET_OK) {
-      ret = tk_ostream_write_str(out, "550 Failed to remove file.\r\n");
+      ret = ftpd_write_550_failed_to_remove_file(out);
     } else {
       ret = tk_ostream_write_str(out, "200 Remove file ok.\r\n");
     }
