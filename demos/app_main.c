@@ -17,7 +17,7 @@ static ret_t main_window_create(void) {
 
 ret_t application_init(void) {
   event_source_manager_t* esm = main_loop_get_event_source_manager(main_loop());
-  socket_init();
+  tk_socket_init();
   s_ftpd = ftpd_create(esm, "./", 2121, 2122);
   ftpd_set_user(s_ftpd, "admin", "admin");
   main_window_create();
@@ -26,7 +26,7 @@ ret_t application_init(void) {
 
 ret_t application_exit(void) {
   ftpd_destroy(s_ftpd);
-  socket_deinit();
+  tk_socket_deinit();
   
   return RET_OK;
 }

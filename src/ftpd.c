@@ -354,7 +354,7 @@ static ret_t ftpd_cmd_port(ftpd_t* ftpd, const char* cmd, tk_ostream_t* out) {
 
     log_debug("ip:%s port:%d\n", ip.str, port);
 
-    sock = tcp_connect(ip.str, port);
+    sock = tk_tcp_connect(ip.str, port);
     ios = tk_iostream_tcp_create(sock);
     if (ios != NULL) {
       tk_ostream_printf(out, "200 PORT command successful.\r\n");
@@ -818,7 +818,7 @@ static ret_t ftpd_on_data_client(event_source_t* source) {
   event_source_fd_t* event_source_fd = (event_source_fd_t*)source;
   ftpd_t* ftpd = (ftpd_t*)(event_source_fd->ctx);
   int fd = event_source_get_fd(source);
-  int sock = tcp_accept(fd);
+  int sock = tk_tcp_accept(fd);
 
   if (sock >= 0) {
     tk_iostream_t* ios = tk_iostream_tcp_create(sock);
@@ -843,7 +843,7 @@ static ret_t ftpd_on_client(event_source_t* source) {
   event_source_fd_t* event_source_fd = (event_source_fd_t*)source;
   ftpd_t* ftpd = (ftpd_t*)(event_source_fd->ctx);
   int fd = event_source_get_fd(source);
-  int sock = tcp_accept(fd);
+  int sock = tk_tcp_accept(fd);
 
   if (ftpd->ios != NULL) {
     const char* msg = "530 server busy.\r\n";
@@ -865,7 +865,7 @@ static ret_t ftpd_on_client(event_source_t* source) {
       event_source_manager_add(ftpd->esm, client_source);
       ftpd->ios = ios;
       ftpd->source = client_source;
-      OBJECT_UNREF(client_source);
+      TK_OBJECT_UNREF(client_source);
       tk_ostream_write_str(out, FTPD_WELCOME_MSG);
     } else {
       log_debug("oom! disconnected:%d\n", sock);
@@ -883,7 +883,7 @@ static ret_t ftpd_listen(ftpd_t* ftpd) {
   event_source_t* source = NULL;
   return_value_if_fail(ftpd != NULL, RET_BAD_PARAMS);
 
-  sock = tcp_listen(ftpd->port);
+  sock = tk_tcp_listen(ftpd->port);
   return_value_if_fail(sock >= 0, RET_BAD_PARAMS);
 
   ftpd->sock = sock;
@@ -892,7 +892,7 @@ static ret_t ftpd_listen(ftpd_t* ftpd) {
 
   log_debug("ftpd listen on %d\n", ftpd->port);
   event_source_manager_add(ftpd->esm, source);
-  OBJECT_UNREF(source);
+  TK_OBJECT_UNREF(source);
 
   return RET_OK;
 }
@@ -902,7 +902,7 @@ static ret_t ftpd_listen_data_port(ftpd_t* ftpd) {
   event_source_t* source = NULL;
   return_value_if_fail(ftpd != NULL, RET_BAD_PARAMS);
 
-  sock = tcp_listen(ftpd->data_port);
+  sock = tk_tcp_listen(ftpd->data_port);
   return_value_if_fail(sock >= 0, RET_BAD_PARAMS);
 
   ftpd->data_sock = sock;
@@ -911,7 +911,7 @@ static ret_t ftpd_listen_data_port(ftpd_t* ftpd) {
 
   log_debug("ftpd data listen on %d\n", ftpd->data_port);
   event_source_manager_add(ftpd->esm, source);
-  OBJECT_UNREF(source);
+  TK_OBJECT_UNREF(source);
 
   return RET_OK;
 }
